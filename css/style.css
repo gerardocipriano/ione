@@ -691,3 +691,9 @@ body.fullscreen .editor-panel{height:100vh;border-radius:0;border:none}
 .mt-2{margin-top:1rem}
 .mb-1{margin-bottom:.5rem}
 .mb-2{margin-bottom:1rem}
+
+/* ── PDF Tools sub-navigation ─────────────────────── */
+.pdf-sub-nav{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem}
+.pdf-sub-nav a{padding:.35rem .7rem;border:1px solid var(--border);border-radius:var(--radius);font-size:.82rem;text-decoration:none;color:inherit;background:var(--bg-card)}
+.pdf-sub-nav a:hover{border-color:var(--primary);background:var(--primary-light)}
+.pdf-sub-nav a.pdf-sub-active{border-color:var(--primary);background:var(--primary-light);font-weight:600}

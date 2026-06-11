@@ -29,7 +29,7 @@ function resolveRoute() {
     if (hash === 'home' || hash === '') return { main: 'home' };
     // Support sub-routes: #text/compress → main=text, sub=compress
     const parts = hash.split('/');
-    const validRoutes = ['json','sql','xml','css','html','base64','jwt','cert','text','ione','markdown'];
+    const validRoutes = ['json','sql','xml','css','html','base64','jwt','cert','text','ione','markdown','pdf'];
     if (validRoutes.includes(parts[0])) {
       return { main: parts[0], sub: parts[1] || null };
     }
@@ -38,9 +38,9 @@ function resolveRoute() {
   // 2) Check path for static tool page (e.g., /json/beautify.html)
   const path = location.pathname.replace(/^\/+/, '').replace(/\/$/, '');
   if (!path || path === 'index.html') return { main: 'home', sub: null };
-  const parts = path.split('/');
-  const validRoutes = ['json','sql','xml','css','html','base64','jwt','text','ione','markdown'];
-  if (parts.length >= 1 && validRoutes.includes(parts[0])) {
+    const parts = path.split('/');
+    const validRoutes = ['json','sql','xml','css','html','base64','jwt','text','ione','markdown','pdf'];
+    if (parts.length >= 1 && validRoutes.includes(parts[0])) {
     return { main: parts[0], sub: parts[1]?.replace('.html','') || null };
   }
   return { main: path, sub: null };
@@ -167,6 +167,14 @@ const TOOLS = [
 
   // ── Document Tools ──────────────────────────────────────────
   { id:'markdown-convert',  label:'Document to Markdown',   icon:'📝', category:'Document Tools',        route:'markdown', sub:'convert' },
+  // PDF Tools
+  { id:'pdf-merge',         label:'Merge PDFs',             icon:'📄', category:'PDF Tools',             route:'pdf',   sub:'merge'    },
+  { id:'pdf-split',         label:'Split PDF',              icon:'✂️', category:'PDF Tools',             route:'pdf',   sub:'split'    },
+  { id:'pdf-extract',       label:'Extract Pages',          icon:'📋', category:'PDF Tools',             route:'pdf',   sub:'extract'  },
+  { id:'pdf-delete',        label:'Remove Pages',           icon:'🗑️', category:'PDF Tools',             route:'pdf',   sub:'delete'   },
+  { id:'pdf-rotate',        label:'Rotate PDF',             icon:'🔄', category:'PDF Tools',             route:'pdf',   sub:'rotate'   },
+  { id:'pdf-compress',       label:'Compress PDF',           icon:'🗜️', category:'PDF Tools',             route:'pdf',   sub:'compress' },
+  { id:'pdf-sign',          label:'Sign PDF',               icon:'✍️', category:'PDF Tools',             route:'pdf',   sub:'sign'     },
 ];
 
 // group by category for homepage
@@ -1238,6 +1246,13 @@ function onRouteChange() {
   if (route.main === 'home') renderHomepage();
   else if (route.main === 'ione') renderImagePage();
   else if (route.main === 'markdown') renderMarkitdownPage();
+  else if (route.main === 'pdf') {
+    if (typeof renderPdfPage === 'function') {
+      renderPdfPage(route.sub || 'merge');
+    } else {
+      writeMain('<div class="tool-header"><div class="tool-title"><span style="font-size:1.8rem">📄</span><h2>PDF Tools</h2></div></div><div class="msg-box error" style="display:flex">PDF engine not loaded. Please refresh the page.</div>');
+    }
+  }
   else renderToolPage(route);
 }
 
@@ -1257,6 +1272,7 @@ function htmlShell() {
       <a href="#cert"          >Certs</a>
       <a href="#ione"          >Images</a>
       <a href="#markdown"      >Markdown</a>
+      <a href="#pdf"           >PDF</a>
     </div>
   </nav>
   <main id="mainContent" class="main"></main>

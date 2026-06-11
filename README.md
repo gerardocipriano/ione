@@ -28,6 +28,7 @@ Then just type `ione` (optionally `ione 3000` for a custom port — default is `
 | Category | Tools |
 |---|---|
 | 📝 **Markdown** | Document → Markdown converter (PDF, DOCX, XLSX, PPTX, HTML, CSV, EPUB, images, audio, ZIP) via MarkItDown |
+| 📄 **PDF** | Merge, Split, Extract pages, Remove pages, Rotate, Compress, Sign (graphic signature) via pypdf + pdfcpu |
 | 🧮 **JSON** | Beautifier, Minifier, Sorter, Validator, JSON→XML, JSON→CSV |
 | 💎 **SQL** | Beautifier, Minifier, Remove Comments |
 | 🌐 **XML** | Beautifier, Minifier, Validator, XML→JSON |
@@ -52,6 +53,27 @@ Upload any document via drag & drop and get clean Markdown back — copy it or d
 # Use it from the CLI too:
 curl -F "file=@report.docx" http://localhost:8080/api/markitdown | jq -r .markdown
 ```
+
+## 📄 PDF Tools
+
+Seven operations under `POST /api/pdf/<op>` (multipart; success → binary PDF/zip download, failure → JSON `{ "error": "..." }`):
+
+| Endpoint | Fields | Engine |
+|---|---|---|
+| `/api/pdf/merge` | `file` (repeated, ≥2) | pypdf |
+| `/api/pdf/split` | `file` → zip of single-page PDFs | pypdf |
+| `/api/pdf/extract` | `file`, `pages` (`1,3,5-9`) | pypdf |
+| `/api/pdf/delete` | `file`, `pages` | pypdf |
+| `/api/pdf/rotate` | `file`, `angle` (90/180/270), `pages` (optional) | pypdf |
+| `/api/pdf/compress` | `file` | pdfcpu `optimize` |
+| `/api/pdf/sign` | `file`, `signature` (PNG/JPG/WebP), `page`, `position` (9 anchors), `scale` | pdfcpu `stamp` |
+
+```bash
+curl -F "file=@a.pdf" -F "file=@b.pdf" http://localhost:8080/api/pdf/merge -o merged.pdf
+curl -F "file=@doc.pdf" -F "signature=@sig.png" -F position=br -F scale=0.2 http://localhost:8080/api/pdf/sign -o signed.pdf
+```
+
+The launcher auto-downloads the **pdfcpu** single binary (~8 MB, Apache-2.0) into `.venv/bin` on first run — no Java, no Docker, no system packages.
 
 ## 🏗️ Architecture
 
