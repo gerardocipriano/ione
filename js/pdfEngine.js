@@ -13,6 +13,7 @@ var PDF_TOOLS = [
   { id:'rotate',  label:'Rotate PDF',     icon:'🔄' },
   { id:'compress',label:'Compress PDF',   icon:'🗜️' },
   { id:'sign',    label:'Sign PDF',       icon:'✍️' },
+  { id:'form',    label:'Fill PDF Form',   icon:'🖊️' },
 ];
 
 function renderPdfPage(subTool) {
@@ -157,6 +158,18 @@ function buildToolContent(sub) {
         + '</div>';
       actionLabel = '✍️ Sign PDF';
       break;
+    case 'form':
+      dropzoneHtml = '<div class="img-dropzone" id="pdfDropzone">'
+        + '<div class="img-dropzone-content">'
+        + '<span class="img-dropzone-icon">📄</span>'
+        + '<p><strong>Drop a PDF here</strong> or click to browse</p>'
+        + '<p class="img-dropzone-hint">PDF with fillable form fields</p>'
+        + '</div>'
+        + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
+        + '</div>';
+      controlsHtml = '<div class="pdf-controls" id="pdfFormFieldsArea" style="max-width:600px;margin-bottom:.75rem"></div>';
+      actionLabel = '🖊️ Fill and Download';
+      break;
   }
 
   var actionRow = '<div style="display:flex;gap:.75rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">'
@@ -182,6 +195,8 @@ function bindPdfEvents(sub) {
   var selectedPdfFile = null;
   var mergeFiles = [];
   var sigFile = null;
+  var formFieldsData = null;
+  var formInitialValues = {};
 
   if (!dropzone || !fileInput || !actionBtn) return;
 
@@ -233,6 +248,11 @@ function bindPdfEvents(sub) {
     var infoEl = document.getElementById('pdfFileInfo');
     if (infoEl) infoEl.textContent = '\uD83D\uDCCE ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)';
     clearMessages();
+    if (sub === 'form') {
+      formFieldsData = null;
+      formInitialValues = {};
+      fetchFormFields(file);
+    }
   }
 
   function handleMergeFiles(fileList) {
@@ -325,10 +345,192 @@ function bindPdfEvents(sub) {
     clearMessages();
   }
 
+  function fetchFormFields(file) {
+    clearMessages();
+    var formArea = document.getElementById('pdfFormFieldsArea');
+    if (formArea) {
+      formArea.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted)"><span class="spinner"></span> Analyzing form fields\u2026</div>';
+    }
+
+    var fd = new FormData();
+    fd.append('file', file);
+
+    fetch('/api/pdf/form-fields', {
+      method: 'POST',
+      body: fd
+    }).then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) {
+          var errMsg = 'Failed to analyze form fields (' + response.status + ')';
+          try { var j = JSON.parse(text); if (j.error) errMsg = j.error; } catch(_) { if (text) errMsg = text; }
+          throw new Error(errMsg);
+        });
+      }
+      return response.json();
+    }).then(function(data) {
+      formFieldsData = data.fields || [];
+      if (formFieldsData.length === 0) {
+        if (formArea) formArea.innerHTML = '';
+        setPdfInfo('The PDF does not contain fillable form fields.');
+        return;
+      }
+      renderFormFields(formArea);
+    }).catch(function(err) {
+      setPdfError(err.message);
+      if (formArea) formArea.innerHTML = '';
+    });
+  }
+
+  function renderFormFields(container) {
+    if (!container) container = document.getElementById('pdfFormFieldsArea');
+    if (!container) return;
+
+    var html = '';
+    formInitialValues = {};
+
+    formFieldsData.forEach(function(field) {
+      var label = field.name;
+      var dotIdx = label.lastIndexOf('.');
+      if (dotIdx !== -1) label = label.substring(dotIdx + 1);
+      label = label.replace(/\s*\[.*?\]\s*$/, '');
+      if (!label) label = field.name;
+
+      var fieldId = 'pdf_field_' + field.name.replace(/[^a-zA-Z0-9_]/g, '_');
+      formInitialValues[field.name] = field.value;
+
+      html += '<div class="pdf-form-field" style="margin-bottom:.75rem">';
+      html += '<label for="' + fieldId + '" style="display:block;font-size:.85rem;margin-bottom:.25rem;font-weight:600">' + escapeHtml(label) + '</label>';
+
+      switch (field.type) {
+        case 'text':
+          var val = field.value != null ? field.value : '';
+          html += '<input type="text" id="' + fieldId + '" value="' + escapeHtml(val) + '" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);box-sizing:border-box">';
+          break;
+        case 'checkbox':
+          var checked = field.value != null && field.value !== '/Off';
+          html += '<input type="checkbox" id="' + fieldId + '"' + (checked ? ' checked' : '') + ' style="transform:scale(1.2);margin:.25rem 0">';
+          break;
+        case 'radio':
+        case 'choice':
+          var options = field.states || [];
+          html += '<select id="' + fieldId + '" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card)">';
+          options.forEach(function(opt) {
+            var selected = opt === field.value ? ' selected' : '';
+            html += '<option value="' + escapeHtml(opt) + '"' + selected + '>' + escapeHtml(opt) + '</option>';
+          });
+          html += '</select>';
+          break;
+      }
+
+      html += '</div>';
+    });
+
+    container.innerHTML = html;
+  }
+
+  function executeFormFill() {
+    if (!selectedPdfFile) {
+      setPdfError('Please select a PDF file first.');
+      return;
+    }
+
+    if (!formFieldsData) {
+      setPdfError('Form fields are still loading. Please wait.');
+      return;
+    }
+
+    var fieldsObj = {};
+    var hasChanges = false;
+
+    formFieldsData.forEach(function(field) {
+      var fieldId = 'pdf_field_' + field.name.replace(/[^a-zA-Z0-9_]/g, '_');
+      var el = document.getElementById(fieldId);
+      if (!el) return;
+
+      var initialVal = formInitialValues[field.name];
+      var currentVal;
+
+      switch (field.type) {
+        case 'text':
+          currentVal = el.value;
+          if (currentVal !== '') {
+            fieldsObj[field.name] = currentVal;
+            hasChanges = true;
+          }
+          break;
+        case 'checkbox':
+          currentVal = el.checked;
+          var initChecked = initialVal != null && initialVal !== '/Off';
+          if (currentVal !== initChecked) {
+            fieldsObj[field.name] = currentVal;
+            hasChanges = true;
+          }
+          break;
+        case 'radio':
+        case 'choice':
+          currentVal = el.value;
+          if (currentVal !== initialVal) {
+            fieldsObj[field.name] = currentVal;
+            hasChanges = true;
+          }
+          break;
+      }
+    });
+
+    if (!hasChanges) {
+      setPdfError('No fields have been modified. Please make changes before filling.');
+      return;
+    }
+
+    var originalBtnText = actionBtn.textContent;
+    actionBtn.disabled = true;
+    actionBtn.innerHTML = '<span class="spinner spinner-dark"></span> Processing\u2026';
+
+    var fd = new FormData();
+    fd.append('file', selectedPdfFile);
+    fd.append('fields', JSON.stringify(fieldsObj));
+
+    fetch('/api/pdf/form-fill', {
+      method: 'POST',
+      body: fd
+    }).then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) {
+          var errMsg = 'Request failed (' + response.status + ')';
+          try { var j = JSON.parse(text); if (j.error) errMsg = j.error; } catch(_) { if (text) errMsg = text; }
+          throw new Error(errMsg);
+        });
+      }
+
+      var contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return response.json().then(function(json) {
+          if (json.error) throw new Error(json.error);
+          throw new Error('Unexpected JSON response from server.');
+        });
+      }
+
+      return response.blob().then(function(blob) {
+        setPdfSuccess('Form filled successfully!');
+        downloadBlob(blob, 'filled.pdf');
+      });
+    }).catch(function(err) {
+      setPdfError(err.message);
+    }).finally(function() {
+      actionBtn.disabled = false;
+      actionBtn.textContent = originalBtnText;
+    });
+  }
+
   actionBtn.addEventListener('click', executeAction);
 
   function executeAction() {
     clearMessages();
+
+    if (sub === 'form') {
+      executeFormFill();
+      return;
+    }
 
     if (sub === 'merge') {
       if (mergeFiles.length < 2) {
@@ -445,7 +647,8 @@ function getOutputFilename(sub) {
     delete: 'pages_removed.pdf',
     rotate: 'rotated.pdf',
     compress: 'compressed.pdf',
-    sign: 'signed.pdf'
+    sign: 'signed.pdf',
+    form: 'filled.pdf'
   };
   return names[sub] || 'output.pdf';
 }
@@ -472,6 +675,10 @@ function setPdfSuccess(msg) {
 function setPdfInfo(msg) {
   var el = document.getElementById('pdfMsgInfo');
   if (el) { el.textContent = '\u2139\uFE0F ' + msg; el.style.display = 'flex'; }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 window.renderPdfPage = renderPdfPage;

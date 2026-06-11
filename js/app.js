@@ -191,14 +191,43 @@ function getToolsByCategory() {
    RENDER FUNCTIONS
    ============================================= */
 
-/** Render the Hero + Search + Categories + Tool Grid on the homepage */
+function compactCardHtml(tool) {
+  const fav = isFavorite(tool.id);
+  return `
+    <div class="compact-card-wrapper" data-id="${tool.id}">
+      <a class="compact-card" href="#${tool.route}${tool.sub ? '/' + tool.sub : ''}" title="${tool.label}">
+        <span class="compact-icon">${tool.icon}</span>
+        <span class="compact-name">${tool.label}</span>
+      </a>
+      <button class="fav-btn ${fav ? 'fav-active' : ''}" data-tool-id="${tool.id}" title="${fav ? 'Remove from favorites' : 'Add to favorites'}">${fav ? '★' : '☆'}</button>
+    </div>`;
+}
+
+function getCollapsedCategories() {
+  try {
+    return JSON.parse(localStorage.getItem('ione-cat-collapsed') || '[]');
+  } catch(e) { return []; }
+}
+
+function toggleCategory(cat) {
+  let collapsed = getCollapsedCategories();
+  if (collapsed.includes(cat)) {
+    collapsed = collapsed.filter(c => c !== cat);
+  } else {
+    collapsed.push(cat);
+  }
+  localStorage.setItem('ione-cat-collapsed', JSON.stringify(collapsed));
+  return collapsed.includes(cat);
+}
+
+function isCategoryCollapsed(cat) {
+  return getCollapsedCategories().includes(cat);
+}
+
+/** Render the Hero + Search + collapsible category sections on the homepage */
 function renderHomepage() {
   document.title = 'Ione — Code Formatter & Beautifier';
   const catMap = getToolsByCategory();
-  // popular / featured
-  const featured = ['json-beautify','sql-beautify','xml-beautify','css-beautify',
-                    'html-viewer','b64-encode','b64-decode','jwt-decode'];
-
   const favs = getFavorites();
   const favTools = favs.length > 0 ? TOOLS.filter(t => favs.includes(t.id)) : [];
 
@@ -213,69 +242,47 @@ function renderHomepage() {
   </div>
 
   <div class="category-bar">
-    <span class="cat-badge ${TOOLS.every(t=>true)?'active':''}" data-cat="all">All</span>
+    <span class="cat-badge active" data-cat="all">All</span>
     ${Object.keys(catMap).map(c =>
       `<span class="cat-badge" data-cat="${c}">${c}</span>`
     ).join('')}
   </div>
 
-  <div class="main">
-    <div id="results">
-      ${favTools.length > 0 ? `
-        <h3 class="section-heading">⭐ Favorites</h3>
-        <div class="featured-grid" data-favs="true">
-          ${favTools.map(t => featuredCardHtml(t)).join('')}
+  <div id="results">
+    ${favTools.length > 0 ? `
+      <div class="cat-section">
+        <div class="cat-header" data-cat="__favorites__">
+          <span class="cat-header-icon">⭐</span>
+          <span class="cat-header-name">Favorites</span>
+          <span class="cat-header-count">${favTools.length}</span>
+          <span class="cat-arrow">▼</span>
         </div>
-      ` : ''}
-      ${renderFeatured(featured, TOOLS)}
-      ${Object.entries(catMap).map(([cat, tools]) => `
-        <h3 class="section-heading">${cat}</h3>
-        <div class="tools-grid" data-cat="${cat}">
-          ${tools.map(t => cardHtml(t)).join('')}
+        <div class="cat-content">
+          ${favTools.map(t => compactCardHtml(t)).join('')}
         </div>
-      `).join('')}
-    </div>
+      </div>
+    ` : ''}
+    ${Object.entries(catMap).map(([cat, tools]) => {
+      const collapsed = isCategoryCollapsed(cat);
+      const icon = tools[0]?.icon || '📁';
+      return `
+        <div class="cat-section">
+          <div class="cat-header" data-cat="${cat}">
+            <span class="cat-header-icon">${icon}</span>
+            <span class="cat-header-name">${cat}</span>
+            <span class="cat-header-count">${tools.length}</span>
+            <span class="cat-arrow">${collapsed ? '▶' : '▼'}</span>
+          </div>
+          <div class="cat-content" ${collapsed ? 'style="display:none"' : ''}>
+            ${tools.map(t => compactCardHtml(t)).join('')}
+          </div>
+        </div>
+      `;
+    }).join('')}
   </div>
   `;
   writeMain(html);
   bindHomepageEvents();
-}
-
-function renderFeatured(ids, allTools) {
-  const featuredTools = allTools.filter(t => ids.includes(t.id));
-  return `
-    <h3 class="section-heading">⚡ Popular Tools</h3>
-    <div class="featured-grid">
-      ${featuredTools.map(t => featuredCardHtml(t)).join('')}
-    </div>
-  `;
-}
-
-function cardHtml(tool) {
-  const fav = isFavorite(tool.id);
-  return `
-    <div class="tool-card-wrapper" data-id="${tool.id}">
-      <a class="tool-card" href="#${tool.route}${tool.sub ? '/' + tool.sub : ''}" title="${tool.label}">
-        <div class="icon">${tool.icon}</div>
-        <div class="info">
-          <div class="name">${tool.label}</div>
-          <div class="cat-label">${tool.category}</div>
-        </div>
-      </a>
-      <button class="fav-btn ${fav ? 'fav-active' : ''}" data-tool-id="${tool.id}" title="${fav ? 'Remove from favorites' : 'Add to favorites'}">${fav ? '★' : '☆'}</button>
-    </div>`;
-}
-
-function featuredCardHtml(tool) {
-  const fav = isFavorite(tool.id);
-  return `
-    <div class="featured-card-wrapper" data-id="${tool.id}">
-      <a class="featured-card" href="#${tool.route}${tool.sub ? '/' + tool.sub : ''}">
-        <div class="f-name">${tool.icon} ${tool.label}</div>
-        <div class="f-desc">${tool.category}</div>
-      </a>
-      <button class="fav-btn ${fav ? 'fav-active' : ''}" data-tool-id="${tool.id}" title="${fav ? 'Remove from favorites' : 'Add to favorites'}">${fav ? '★' : '☆'}</button>
-    </div>`;
 }
 
 /** Render a tool page */
@@ -512,31 +519,16 @@ function clearMsg(id) {
    EVENT BINDING — HOMEPAGE
    ============================================= */
 function bindHomepageEvents() {
-  // Category filter
-  const catMap = getToolsByCategory();
+  // Category filter badges
   document.querySelectorAll('.cat-badge').forEach(badge => {
     badge.addEventListener('click', () => {
       document.querySelectorAll('.cat-badge').forEach(b => b.classList.remove('active'));
       badge.classList.add('active');
       const cat = badge.dataset.cat;
-      // Toggle grid sections
-      document.querySelectorAll('.tools-grid').forEach(g => {
-        g.style.display = (cat === 'all' || g.dataset.cat === cat) ? 'grid' : 'none';
-      });
-      // Toggle section headings
-      document.querySelectorAll('.section-heading').forEach(h => {
-        const headingCat = h.textContent.replace(/^[⭐⚡🔄]*\s*/,'').trim();
-        const isFav = headingCat === 'Favorites';
-        const isPopular = headingCat === 'Popular Tools';
-        if (isFav) {
-          h.style.display = (cat === 'all') ? '' : 'none';
-          const favGrid = document.querySelector('.featured-grid[data-favs]');
-          if (favGrid) favGrid.style.display = (cat === 'all') ? '' : 'none';
-        } else if (isPopular) {
-          h.style.display = (cat === 'all') ? '' : 'none';
-        } else {
-          h.style.display = (cat === 'all' || headingCat === cat) ? '' : 'none';
-        }
+      document.querySelectorAll('.cat-section').forEach(section => {
+        const header = section.querySelector('.cat-header');
+        const sectionCat = header ? header.dataset.cat : '';
+        section.style.display = (cat === 'all' || sectionCat === cat) ? '' : 'none';
       });
     });
   });
@@ -546,12 +538,60 @@ function bindHomepageEvents() {
   if (searchInput) {
     searchInput.addEventListener('input', () => {
       const q = searchInput.value.trim().toLowerCase();
-      document.querySelectorAll('.tool-card-wrapper,.featured-card-wrapper').forEach(wrap => {
-        const found = wrap.textContent.toLowerCase().includes(q);
-        wrap.style.display = found ? '' : 'none';
+      const isSearching = q.length > 0;
+
+      if (isSearching) {
+        document.querySelectorAll('.cat-badge').forEach(b => b.classList.remove('active'));
+      }
+
+      document.querySelectorAll('.cat-section').forEach(section => {
+        const content = section.querySelector('.cat-content');
+        const wrappers = section.querySelectorAll('.compact-card-wrapper');
+        let hasVisible = false;
+
+        wrappers.forEach(w => {
+          const found = !q || w.textContent.toLowerCase().includes(q);
+          w.style.display = found ? '' : 'none';
+          if (found) hasVisible = true;
+        });
+
+        if (isSearching) {
+          section.style.display = hasVisible ? '' : 'none';
+          if (content) content.style.display = '';
+        } else {
+          section.style.display = '';
+          wrappers.forEach(w => w.style.display = '');
+          if (content) {
+            const cat = section.querySelector('.cat-header')?.dataset.cat;
+            if (cat && cat !== '__favorites__' && isCategoryCollapsed(cat)) {
+              content.style.display = 'none';
+            } else {
+              content.style.display = '';
+            }
+          }
+        }
       });
+
+      if (!isSearching) {
+        document.querySelectorAll('.cat-badge').forEach(b => b.classList.remove('active'));
+        const allBadge = document.querySelector('.cat-badge[data-cat="all"]');
+        if (allBadge) allBadge.classList.add('active');
+      }
     });
   }
+
+  // Collapsible category headers
+  document.querySelectorAll('.cat-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const cat = header.dataset.cat;
+      const content = header.nextElementSibling;
+      if (!content || !content.classList.contains('cat-content')) return;
+      const nowCollapsed = toggleCategory(cat);
+      content.style.display = nowCollapsed ? 'none' : '';
+      const arrow = header.querySelector('.cat-arrow');
+      if (arrow) arrow.textContent = nowCollapsed ? '▶' : '▼';
+    });
+  });
 
   // Favorite buttons
   document.querySelectorAll('.fav-btn').forEach(btn => {

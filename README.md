@@ -28,7 +28,7 @@ Then just type `ione` (optionally `ione 3000` for a custom port — default is `
 | Category | Tools |
 |---|---|
 | 📝 **Markdown** | Document → Markdown converter (PDF, DOCX, XLSX, PPTX, HTML, CSV, EPUB, images, audio, ZIP) via MarkItDown |
-| 📄 **PDF** | Merge, Split, Extract pages, Remove pages, Rotate, Compress, Sign (graphic signature) via pypdf + pdfcpu |
+| 📄 **PDF** | Merge, Split, Extract pages, Remove pages, Rotate, Compress, Sign (graphic signature), Fill forms (AcroForm) via pypdf + pdfcpu |
 | 🧮 **JSON** | Beautifier, Minifier, Sorter, Validator, JSON→XML, JSON→CSV |
 | 💎 **SQL** | Beautifier, Minifier, Remove Comments |
 | 🌐 **XML** | Beautifier, Minifier, Validator, XML→JSON |
@@ -67,6 +67,8 @@ Seven operations under `POST /api/pdf/<op>` (multipart; success → binary PDF/z
 | `/api/pdf/rotate` | `file`, `angle` (90/180/270), `pages` (optional) | pypdf |
 | `/api/pdf/compress` | `file` | pdfcpu `optimize` |
 | `/api/pdf/sign` | `file`, `signature` (PNG/JPG/WebP), `page`, `position` (9 anchors), `scale` | pdfcpu `stamp` |
+| `/api/pdf/form-fields` | `file` → JSON list of AcroForm fields (name, type, value, states) | pypdf |
+| `/api/pdf/form-fill` | `file`, `fields` (JSON object name→value) → filled PDF | pypdf |
 
 ```bash
 curl -F "file=@a.pdf" -F "file=@b.pdf" http://localhost:8080/api/pdf/merge -o merged.pdf

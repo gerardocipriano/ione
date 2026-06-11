@@ -34,6 +34,12 @@ if [ ! -x "$VENV_DIR/bin/pdfcpu" ]; then
     fi
 fi
 
+if curl -s --max-time 1 -o /dev/null "http://127.0.0.1:$PORT"; then
+    echo "  ⚠ Port $PORT is already in use (an old ione/http.server instance?)."
+    echo "    Find it with:  ss -ltnp | grep :$PORT   then kill the PID, or run: ione <other-port>"
+    exit 1
+fi
+
 echo "  ione running on http://localhost:$PORT"
 "$VENV_DIR/bin/python" "$SCRIPT_DIR/ione_server.py" "$PORT" &
 SERVER_PID=$!

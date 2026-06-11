@@ -51,6 +51,10 @@ class IoneHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_pdf_compress()
         elif self.path == '/api/pdf/sign':
             self._handle_pdf_sign()
+        elif self.path == '/api/pdf/form-fields':
+            self._handle_pdf_form_fields()
+        elif self.path == '/api/pdf/form-fill':
+            self._handle_pdf_form_fill()
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -673,6 +677,163 @@ class IoneHandler(http.server.SimpleHTTPRequestHandler):
         finally:
             if tmpdir is not None:
                 shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def _handle_pdf_form_fields(self):
+        if not _pypdf_available:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                'error': 'pypdf library not available'
+            })
+            return
+
+        body = self._read_body()
+        if body is None:
+            return
+
+        fields_data = self._parse_multipart_fields(body, self.headers.get('Content-Type', ''))
+        file_field = next((f for f in fields_data if f[0] == 'file'), None)
+
+        if file_field is None:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': 'No file field found'
+            })
+            return
+
+        _, fn, data = file_field
+        if not fn or not fn.lower().endswith('.pdf'):
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': 'File must be PDF'
+            })
+            return
+
+        try:
+            reader = PdfReader(io.BytesIO(data))
+        except Exception as e:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': f'Invalid PDF: {e}'
+            })
+            return
+
+        _TYPE_MAP = {'/Tx': 'text', '/Btn': 'checkbox', '/Ch': 'choice'}
+
+        fields = []
+        raw = reader.get_fields()
+        if raw:
+            for name, field in raw.items():
+                if field is None:
+                    continue
+                ft = field.field_type
+                if ft is None:
+                    continue
+                ft_str = str(ft)
+                mapped = _TYPE_MAP.get(ft_str, ft_str)
+                entry = {
+                    'name': name,
+                    'type': mapped,
+                    'value': field.get('/V'),
+                }
+                states = field.get('/_States_')
+                if states is not None:
+                    entry['states'] = list(states)
+                    if ft_str == '/Btn' and len(states) > 2:
+                        entry['type'] = 'radio'
+                fields.append(entry)
+
+        self._send_json(HTTPStatus.OK, {
+            'fields': fields,
+            'filename': fn,
+        })
+
+    def _handle_pdf_form_fill(self):
+        if not _pypdf_available:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                'error': 'pypdf library not available'
+            })
+            return
+
+        body = self._read_body()
+        if body is None:
+            return
+
+        fields_data = self._parse_multipart_fields(body, self.headers.get('Content-Type', ''))
+        file_field = next((f for f in fields_data if f[0] == 'file'), None)
+        form_json = next((f[2].decode('utf-8') for f in fields_data
+                          if f[0] in ('form_fields', 'fields')), None)
+
+        if file_field is None:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': 'No file field found'
+            })
+            return
+
+        if form_json is None:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': 'form_fields field required'
+            })
+            return
+
+        _, fn, data = file_field
+        if not fn or not fn.lower().endswith('.pdf'):
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': 'File must be PDF'
+            })
+            return
+
+        try:
+            values = json.loads(form_json)
+        except json.JSONDecodeError as e:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': f'Invalid JSON in form_fields: {e}'
+            })
+            return
+
+        if not isinstance(values, dict):
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': 'form_fields must be a JSON object'
+            })
+            return
+
+        try:
+            reader = PdfReader(io.BytesIO(data))
+        except Exception as e:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': f'Invalid PDF: {e}'
+            })
+            return
+
+        raw = reader.get_fields() or {}
+        for fname, fval in list(values.items()):
+            field = raw.get(fname)
+            if field is not None and field.field_type == '/Btn':
+                states = field.get('/_States_')
+                if states:
+                    on_state = next((s for s in states if s != '/Off'), None)
+                    if isinstance(fval, bool):
+                        values[fname] = on_state if fval else '/Off'
+                    elif isinstance(fval, str) and fval.lower() in ('true', 'on', '1', 'yes'):
+                        values[fname] = on_state if on_state else fval
+                    elif fval in (1,):
+                        values[fname] = on_state if on_state else fval
+                    else:
+                        values[fname] = '/Off'
+
+        try:
+            writer = PdfWriter(clone_from=reader)
+            for page in writer.pages:
+                try:
+                    writer.update_page_form_field_values(page, values)
+                except Exception as e:
+                    if 'No fields to update on this page' in str(e):
+                        continue
+                    raise
+
+            buf = io.BytesIO()
+            writer.write(buf)
+        except Exception as e:
+            self._send_json(HTTPStatus.BAD_REQUEST, {
+                'error': f'Form fill failed: {e}'
+            })
+            return
+        self._send_binary(HTTPStatus.OK, buf.getvalue(), 'application/pdf', 'filled.pdf')
 
     def _parse_multipart_fields(self, body, content_type):
         m = re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type, re.I)
