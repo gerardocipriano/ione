@@ -1,0 +1,9 @@
+# Add this to your ~/.zshrc (or ~/.bashrc):
+alias ione='$HOME/code/ione/bin/ione-server.sh'
+
+# Or run this command to append it automatically:
+# echo "alias ione='\$HOME/code/ione/bin/ione-server.sh'" >> ~/.zshrc && source ~/.zshrc
+
+# The launcher bootstraps a Python venv with markitdown on first run,
+# starts the Ione server (static tools + /api/markitdown) and opens the browser.
+# Usage: ione [port]   (default 8080)
