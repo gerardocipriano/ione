@@ -135,28 +135,28 @@ function buildToolContent(sub) {
         + '<p><strong>Drop a PDF here</strong> or click to browse</p>'
         + '</div>'
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
+        + '</div>'
+        + '<div id="pdfSignPreview" style="display:none">'
+        + '<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">'
+        + '<button class="btn btn-sm" id="pdfPrevPage" type="button">◀</button>'
+        + '<span id="pdfPageIndicator" style="font-size:.85rem">Page 1 of 1</span>'
+        + '<button class="btn btn-sm" id="pdfNextPage" type="button">▶</button>'
+        + '<button class="btn btn-sm" id="pdfChangePdf" type="button">Change PDF</button>'
+        + '</div>'
+        + '<div id="pdfSignPreviewContainer" style="position:relative;display:inline-block;max-width:100%;overflow:hidden">'
+        + '<canvas id="pdfPreviewCanvas" style="display:block;border:1px solid var(--border);border-radius:4px"></canvas>'
+        + '<img id="pdfSigOverlay" style="position:absolute;display:none;cursor:move;border:2px dashed rgba(0,0,0,.3);touch-action:none">'
+        + '</div>'
         + '</div>';
-      controlsHtml = '<div class="pdf-controls" style="margin-bottom:.75rem">'
-        + '<div class="img-dropzone" id="pdfSigDropzone" style="margin-bottom:.75rem">'
-        + '<div class="img-dropzone-content">'
+      controlsHtml = '<div class="img-dropzone" id="pdfSigDropzone" style="margin-bottom:.75rem">'
+        + '<div class="img-dropzone-content" id="pdfSigDropzoneContent">'
         + '<span class="img-dropzone-icon">✍️</span>'
         + '<p><strong>Drop signature image here</strong> or click to browse</p>'
         + '<p class="img-dropzone-hint">Supports: PNG, JPG, WebP</p>'
         + '</div>'
         + '<input type="file" id="pdfSigInput" accept=".png,.jpg,.jpeg,.webp" style="display:none">'
-        + '</div>'
-        + '<div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;margin-bottom:.5rem">'
-        + '<label style="font-size:.85rem">Page: <input type="number" id="pdfSignPage" value="1" min="1" style="width:70px;padding:.4rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card)"></label>'
-        + '<label style="font-size:.85rem">Position: <select id="pdfSignPosition" style="padding:.4rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card)">'
-        + '<option value="tl">Top Left</option><option value="tc">Top Center</option><option value="tr">Top Right</option>'
-        + '<option value="l">Left</option><option value="c">Center</option><option value="r">Right</option>'
-        + '<option value="bl">Bottom Left</option><option value="bc">Bottom Center</option><option value="br" selected>Bottom Right</option>'
-        + '</select></label>'
-        + '</div>'
-        + '<label style="font-size:.85rem">Scale: <span id="pdfSignScaleVal">0.20</span>'
-        + '<input type="range" id="pdfSignScale" min="0" max="1" step="0.05" value="0.2" style="width:100%;display:block"></label>'
         + '</div>';
-      actionLabel = '✍️ Sign PDF';
+      actionLabel = '✍️ Sign and Download';
       break;
     case 'form':
       dropzoneHtml = '<div class="img-dropzone" id="pdfDropzone">'
@@ -194,9 +194,10 @@ function bindPdfEvents(sub) {
   var actionBtn = document.getElementById('pdfBtnAction');
   var selectedPdfFile = null;
   var mergeFiles = [];
-  var sigFile = null;
   var formFieldsData = null;
   var formInitialValues = {};
+  var signLoadPdf = null;
+  var signExecute = null;
 
   if (!dropzone || !fileInput || !actionBtn) return;
 
@@ -253,6 +254,9 @@ function bindPdfEvents(sub) {
       formInitialValues = {};
       fetchFormFields(file);
     }
+    if (sub === 'sign' && signLoadPdf) {
+      signLoadPdf(file);
+    }
   }
 
   function handleMergeFiles(fileList) {
@@ -300,8 +304,245 @@ function bindPdfEvents(sub) {
   }
 
   if (sub === 'sign') {
+    var sigArrayBuffer = null;
+    var sigMimeType = null;
+    var sigNaturalWidth = 0;
+    var sigNaturalHeight = 0;
+    var sigDataUrl = null;
+    var currentPageNum = 1;
+    var totalPages = 0;
+    var pdfDocPdfJs = null;
+    var pdfPageWidth = 0;
+    var pdfPageHeight = 0;
+    var canvasWidth = 0;
+    var canvasHeight = 0;
+    var overlayImg = document.getElementById('pdfSigOverlay');
+    var previewArea = document.getElementById('pdfSignPreview');
+    var previewContainer = document.getElementById('pdfSignPreviewContainer');
+    var canvas = document.getElementById('pdfPreviewCanvas');
+    var prevBtn = document.getElementById('pdfPrevPage');
+    var nextBtn = document.getElementById('pdfNextPage');
+    var pageIndicator = document.getElementById('pdfPageIndicator');
+    var changePdfBtn = document.getElementById('pdfChangePdf');
     var sigDropzone = document.getElementById('pdfSigDropzone');
     var sigInput = document.getElementById('pdfSigInput');
+    var sigDropzoneContent = document.getElementById('pdfSigDropzoneContent');
+    var isDragging = false;
+    var isResizing = false;
+    var dragStartX, dragStartY, dragOrigLeft, dragOrigTop;
+    var resizeStartX, resizeStartY, resizeOrigW, resizeOrigH;
+
+    signLoadPdf = loadAndRenderPdf;
+    function loadAndRenderPdf(file) {
+      var reader = new FileReader();
+      reader.onload = async function(e) {
+        try {
+          var pdfjsLib = await import('/js/vendor/pdf.min.mjs');
+          pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/vendor/pdf.worker.min.mjs';
+
+          var arrayBuffer = e.target.result;
+          pdfDocPdfJs = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          totalPages = pdfDocPdfJs.numPages;
+          currentPageNum = 1;
+          await renderPage(currentPageNum);
+
+          var dropzone = document.getElementById('pdfDropzone');
+          if (dropzone) dropzone.style.display = 'none';
+          previewArea.style.display = 'block';
+          clearMessages();
+        } catch (err) {
+          setPdfError('Failed to load PDF: ' + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    async function renderPage(pageNum) {
+      if (!pdfDocPdfJs) return;
+      try {
+        var pg = await pdfDocPdfJs.getPage(pageNum);
+        var baseVp = pg.getViewport({ scale: 1 });
+
+        var containerWidth = Math.min(previewContainer.clientWidth || 800, 800);
+        var scale = containerWidth / baseVp.width;
+        var viewport = pg.getViewport({ scale: scale });
+
+        pdfPageWidth = baseVp.width;
+        pdfPageHeight = baseVp.height;
+        canvasWidth = Math.round(viewport.width);
+        canvasHeight = Math.round(viewport.height);
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        canvas.style.width = canvasWidth + 'px';
+        canvas.style.height = canvasHeight + 'px';
+
+        var ctx = canvas.getContext('2d');
+        await pg.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+        if (pageIndicator) {
+          pageIndicator.textContent = 'Page ' + pageNum + ' of ' + totalPages;
+        }
+        if (prevBtn) prevBtn.disabled = pageNum <= 1;
+        if (nextBtn) nextBtn.disabled = pageNum >= totalPages;
+        if (prevBtn) prevBtn.style.display = totalPages > 1 ? '' : 'none';
+        if (nextBtn) nextBtn.style.display = totalPages > 1 ? '' : 'none';
+        if (pageIndicator) pageIndicator.style.display = totalPages > 1 ? '' : 'none';
+
+        if (overlayImg) {
+          overlayImg.style.display = sigDataUrl ? 'block' : 'none';
+        }
+      } catch (err) {
+        setPdfError('Failed to render page: ' + err.message);
+      }
+    }
+
+    function positionOverlayDefault() {
+      var defaultW = Math.min(150, canvasWidth * 0.4);
+      var aspect = sigNaturalWidth / sigNaturalHeight || 1;
+      var defaultH = defaultW / aspect;
+      overlayImg.style.width = Math.round(defaultW) + 'px';
+      overlayImg.style.height = Math.round(defaultH) + 'px';
+      overlayImg.style.left = (canvasWidth - defaultW - 20) + 'px';
+      overlayImg.style.top = (canvasHeight - defaultH - 20) + 'px';
+    }
+
+    function loadSignature(file) {
+      var MAX_BYTES = 50 * 1024 * 1024;
+      if (file.size > MAX_BYTES) {
+        setPdfError('Signature image too large. Maximum size is 50 MB.');
+        return;
+      }
+      sigMimeType = file.type;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        sigArrayBuffer = e.target.result;
+
+        var blob = new Blob([sigArrayBuffer], { type: sigMimeType });
+        sigDataUrl = URL.createObjectURL(blob);
+
+        var img = new Image();
+        img.onload = function() {
+          sigNaturalWidth = img.naturalWidth;
+          sigNaturalHeight = img.naturalHeight;
+
+          overlayImg.src = sigDataUrl;
+          if (canvasWidth > 0) {
+            overlayImg.style.display = 'block';
+            positionOverlayDefault();
+          }
+
+          if (sigDropzoneContent) {
+            sigDropzoneContent.innerHTML = ''
+              + '<img src="' + sigDataUrl + '" style="max-height:120px;max-width:100%;border-radius:4px;display:block;margin:0 auto">'
+              + '<p style="font-size:.8rem;margin-top:.25rem">' + file.name + ' — click to change</p>';
+          }
+
+          clearMessages();
+        };
+        img.onerror = function() {
+          URL.revokeObjectURL(sigDataUrl);
+          setPdfError('Failed to decode signature image.');
+        };
+        img.src = sigDataUrl;
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function initDrag(e) {
+      if (isResizing) return;
+      isDragging = true;
+      var pos = getEventPos(e);
+      dragStartX = pos.x;
+      dragStartY = pos.y;
+      dragOrigLeft = parseInt(overlayImg.style.left) || 0;
+      dragOrigTop = parseInt(overlayImg.style.top) || 0;
+      e.preventDefault();
+    }
+
+    function doDrag(e) {
+      if (!isDragging) return;
+      var pos = getEventPos(e);
+      var dx = pos.x - dragStartX;
+      var dy = pos.y - dragStartY;
+      var newLeft = Math.max(0, Math.min(canvasWidth - overlayImg.offsetWidth, dragOrigLeft + dx));
+      var newTop = Math.max(0, Math.min(canvasHeight - overlayImg.offsetHeight, dragOrigTop + dy));
+      overlayImg.style.left = newLeft + 'px';
+      overlayImg.style.top = newTop + 'px';
+      e.preventDefault();
+    }
+
+    function stopDrag() {
+      isDragging = false;
+    }
+
+    function initResize(e) {
+      isResizing = true;
+      var pos = getEventPos(e);
+      resizeStartX = pos.x;
+      resizeStartY = pos.y;
+      resizeOrigW = overlayImg.offsetWidth;
+      resizeOrigH = overlayImg.offsetHeight;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    function doResize(e) {
+      if (!isResizing) return;
+      var pos = getEventPos(e);
+      var dx = pos.x - resizeStartX;
+      var dy = pos.y - resizeStartY;
+      var aspect = sigNaturalWidth / sigNaturalHeight || 1;
+      var newW = Math.max(40, Math.min(canvasWidth * 0.8, resizeOrigW + dx));
+      var newH = newW / aspect;
+      if (newH > canvasHeight * 0.8) {
+        newH = canvasHeight * 0.8;
+        newW = newH * aspect;
+      }
+      overlayImg.style.width = Math.round(newW) + 'px';
+      overlayImg.style.height = Math.round(newH) + 'px';
+      var left = parseInt(overlayImg.style.left) || 0;
+      var top = parseInt(overlayImg.style.top) || 0;
+      if (left + newW > canvasWidth) {
+        overlayImg.style.left = Math.max(0, canvasWidth - newW) + 'px';
+      }
+      if (top + newH > canvasHeight) {
+        overlayImg.style.top = Math.max(0, canvasHeight - newH) + 'px';
+      }
+      e.preventDefault();
+    }
+
+    function stopResize() {
+      isResizing = false;
+    }
+
+    function getEventPos(e) {
+      if (e.touches) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+      return { x: e.clientX, y: e.clientY };
+    }
+
+    if (overlayImg) {
+      overlayImg.addEventListener('mousedown', initDrag);
+      overlayImg.addEventListener('touchstart', initDrag, { passive: false });
+
+      document.addEventListener('mousemove', doDrag);
+      document.addEventListener('mouseup', stopDrag);
+      document.addEventListener('touchmove', doDrag, { passive: false });
+      document.addEventListener('touchend', stopDrag);
+
+      var resizeHandle = document.createElement('div');
+      resizeHandle.style.cssText = 'position:absolute;bottom:0;right:0;width:16px;height:16px;cursor:nwse-resize;background:rgba(0,0,0,.2);border-radius:0 0 4px 0';
+      resizeHandle.title = 'Resize';
+      overlayImg.parentNode.appendChild(resizeHandle);
+
+      resizeHandle.addEventListener('mousedown', initResize);
+      resizeHandle.addEventListener('touchstart', initResize, { passive: false });
+      document.addEventListener('mousemove', doResize);
+      document.addEventListener('mouseup', stopResize);
+      document.addEventListener('touchmove', doResize, { passive: false });
+      document.addEventListener('touchend', stopResize);
+    }
 
     if (sigDropzone && sigInput) {
       sigDropzone.addEventListener('click', function() { sigInput.click(); });
@@ -311,38 +552,157 @@ function bindPdfEvents(sub) {
         e.preventDefault();
         sigDropzone.classList.remove('drag-over');
         if (e.dataTransfer.files.length) {
-          sigFile = e.dataTransfer.files[0];
-          updateSigInfo(sigFile);
+          loadSignature(e.dataTransfer.files[0]);
         }
       });
       sigInput.addEventListener('change', function(e) {
         if (e.target.files.length) {
-          sigFile = e.target.files[0];
-          updateSigInfo(sigFile);
+          loadSignature(e.target.files[0]);
         }
         sigInput.value = '';
       });
     }
 
-    var scaleInput = document.getElementById('pdfSignScale');
-    if (scaleInput) {
-      scaleInput.addEventListener('input', function() {
-        var valEl = document.getElementById('pdfSignScaleVal');
-        if (valEl) valEl.textContent = parseFloat(this.value).toFixed(2);
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function() {
+        if (currentPageNum > 1) {
+          currentPageNum--;
+          renderPage(currentPageNum);
+        }
       });
     }
-  }
-
-  function updateSigInfo(file) {
-    var MAX_BYTES = 50 * 1024 * 1024;
-    if (file.size > MAX_BYTES) {
-      setPdfError('Signature image too large. Maximum size is 50 MB.');
-      sigFile = null;
-      return;
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function() {
+        if (currentPageNum < totalPages) {
+          currentPageNum++;
+          renderPage(currentPageNum);
+        }
+      });
     }
-    var infoEl = document.getElementById('pdfFileInfo');
-    if (infoEl) infoEl.textContent = '\u270D\uFE0F Signature: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
-    clearMessages();
+    if (changePdfBtn) {
+      changePdfBtn.addEventListener('click', function() {
+        var dropzone = document.getElementById('pdfDropzone');
+        if (dropzone) dropzone.style.display = '';
+        previewArea.style.display = 'none';
+        selectedPdfFile = null;
+        pdfDocPdfJs = null;
+        sigArrayBuffer = null;
+        sigDataUrl = null;
+        overlayImg.style.display = 'none';
+        if (sigDropzoneContent) {
+          sigDropzoneContent.innerHTML = ''
+            + '<span class="img-dropzone-icon">✍️</span>'
+            + '<p><strong>Drop signature image here</strong> or click to browse</p>'
+            + '<p class="img-dropzone-hint">Supports: PNG, JPG, WebP</p>';
+        }
+        var infoEl = document.getElementById('pdfFileInfo');
+        if (infoEl) infoEl.textContent = '';
+      });
+    }
+
+    signExecute = executeClientSideSign;
+    function executeClientSideSign() {
+      if (!selectedPdfFile) {
+        setPdfError('Please select a PDF file first.');
+        return;
+      }
+      if (!sigArrayBuffer) {
+        setPdfError('Please select a signature image.');
+        return;
+      }
+
+      var originalBtnText = actionBtn.textContent;
+      actionBtn.disabled = true;
+      actionBtn.innerHTML = '<span class="spinner spinner-dark"></span> Processing\u2026';
+
+      var reader = new FileReader();
+      reader.onerror = function() {
+        setPdfError('Failed to read PDF file.');
+        actionBtn.disabled = false;
+        actionBtn.textContent = originalBtnText;
+      };
+      reader.onload = async function(e) {
+        try {
+          var pdfArrayBuffer = e.target.result;
+          var pdfDoc = await window.PDFLib.PDFDocument.load(pdfArrayBuffer);
+
+          var pages = pdfDoc.getPages();
+          if (currentPageNum < 1 || currentPageNum > pages.length) {
+            throw new Error('Invalid page number.');
+          }
+          var pg = pages[currentPageNum - 1];
+          var pgSize = pg.getSize();
+
+          var scaleX = pgSize.width / canvasWidth;
+          var scaleY = pgSize.height / canvasHeight;
+
+          var overlayLeft = parseInt(overlayImg.style.left) || 0;
+          var overlayTop = parseInt(overlayImg.style.top) || 0;
+          var overlayW = overlayImg.offsetWidth;
+          var overlayH = overlayImg.offsetHeight;
+
+          var pdfX = overlayLeft * scaleX;
+          var pdfY = (canvasHeight - overlayTop - overlayH) * scaleY;
+          var pdfSigW = overlayW * scaleX;
+          var pdfSigH = overlayH * scaleY;
+
+          var sigImage;
+          if (sigMimeType === 'image/png') {
+            sigImage = await pdfDoc.embedPng(sigArrayBuffer);
+          } else if (sigMimeType === 'image/jpeg' || sigMimeType === 'image/jpg') {
+            sigImage = await pdfDoc.embedJpg(sigArrayBuffer);
+          } else if (sigMimeType === 'image/webp') {
+            sigImage = await embedWebpAsPng(pdfDoc, sigArrayBuffer);
+          } else {
+            sigImage = await pdfDoc.embedPng(sigArrayBuffer);
+          }
+
+          pg.drawImage(sigImage, {
+            x: pdfX,
+            y: pdfY,
+            width: pdfSigW,
+            height: pdfSigH
+          });
+
+          var pdfBytes = await pdfDoc.save();
+          var blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          setPdfSuccess('PDF signed successfully!');
+          downloadBlob(blob, 'signed.pdf');
+        } catch (err) {
+          setPdfError('Error signing PDF: ' + err.message);
+        } finally {
+          actionBtn.disabled = false;
+          actionBtn.textContent = originalBtnText;
+        }
+      };
+      reader.readAsArrayBuffer(selectedPdfFile);
+    }
+
+    async function embedWebpAsPng(pdfDoc, arrayBuffer) {
+      var blob = new Blob([arrayBuffer], { type: 'image/webp' });
+      var url = URL.createObjectURL(blob);
+      return new Promise(function(resolve, reject) {
+        var img = new Image();
+        img.onload = function() {
+          var c = document.createElement('canvas');
+          c.width = img.naturalWidth;
+          c.height = img.naturalHeight;
+          var ctx = c.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          c.toBlob(function(pngBlob) {
+            URL.revokeObjectURL(url);
+            pngBlob.arrayBuffer().then(function(buf) {
+              pdfDoc.embedPng(buf).then(resolve).catch(reject);
+            }).catch(reject);
+          }, 'image/png');
+        };
+        img.onerror = function() {
+          URL.revokeObjectURL(url);
+          reject(new Error('Failed to decode WebP image.'));
+        };
+        img.src = url;
+      });
+    }
   }
 
   function fetchFormFields(file) {
@@ -532,6 +892,11 @@ function bindPdfEvents(sub) {
       return;
     }
 
+    if (sub === 'sign') {
+      if (signExecute) signExecute();
+      return;
+    }
+
     if (sub === 'merge') {
       if (mergeFiles.length < 2) {
         setPdfError('Please select at least 2 PDF files to merge.');
@@ -542,11 +907,6 @@ function bindPdfEvents(sub) {
         setPdfError('Please select a PDF file first.');
         return;
       }
-    }
-
-    if (sub === 'sign' && !sigFile) {
-      setPdfError('Please select a signature image.');
-      return;
     }
 
     if ((sub === 'extract' || sub === 'delete') && !document.getElementById('pdfPages')?.value.trim()) {
@@ -563,15 +923,6 @@ function bindPdfEvents(sub) {
 
     if (sub === 'merge') {
       mergeFiles.forEach(function(f) { formData.append('file', f); });
-    } else if (sub === 'sign') {
-      formData.append('file', selectedPdfFile);
-      formData.append('signature', sigFile);
-      var page = document.getElementById('pdfSignPage')?.value || '1';
-      var position = document.getElementById('pdfSignPosition')?.value || 'br';
-      var scale = document.getElementById('pdfSignScale')?.value || '0.2';
-      formData.append('page', page);
-      formData.append('position', position);
-      formData.append('scale', scale);
     } else {
       formData.append('file', selectedPdfFile);
       originalSize = selectedPdfFile.size;
