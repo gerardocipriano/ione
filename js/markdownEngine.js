@@ -168,7 +168,7 @@ function bindMarkdownEvents() {
       document.getElementById('mdEditorArea').style.display = '';
       setMdSuccess('Converted "' + (data.filename || selectedFile.name) + '" to Markdown successfully!');
     } catch (err) {
-      setMdError(err.message);
+      setMdError(friendlyFetchError(err));
       document.getElementById('mdEditorArea').style.display = 'none';
     } finally {
       convertBtn.disabled = false;
@@ -188,6 +188,13 @@ function setMdSuccess(msg) {
 function setMdInfo(msg) {
   var el = document.getElementById('mdMsgInfo');
   if (el) { el.textContent = '\u2139\uFE0F ' + msg; el.style.display = 'flex'; }
+}
+
+function friendlyFetchError(err) {
+  if (err instanceof TypeError || /failed to fetch|networkerror/i.test(err.message)) {
+    return 'Cannot reach the ione server. Is it still running? Restart it with the "ione" command (default port 8311) and reload this page from the right URL.';
+  }
+  return err.message;
 }
 
 window.renderMarkitdownPage = renderMarkitdownPage;

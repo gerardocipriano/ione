@@ -376,7 +376,7 @@ function bindPdfEvents(sub) {
       }
       renderFormFields(formArea);
     }).catch(function(err) {
-      setPdfError(err.message);
+      setPdfError(friendlyFetchError(err));
       if (formArea) formArea.innerHTML = '';
     });
   }
@@ -515,7 +515,7 @@ function bindPdfEvents(sub) {
         downloadBlob(blob, 'filled.pdf');
       });
     }).catch(function(err) {
-      setPdfError(err.message);
+      setPdfError(friendlyFetchError(err));
     }).finally(function() {
       actionBtn.disabled = false;
       actionBtn.textContent = originalBtnText;
@@ -631,7 +631,7 @@ function bindPdfEvents(sub) {
         downloadBlob(blob, filename);
       });
     }).catch(function(err) {
-      setPdfError(err.message);
+      setPdfError(friendlyFetchError(err));
     }).finally(function() {
       actionBtn.disabled = false;
       actionBtn.textContent = originalBtnText;
@@ -679,6 +679,13 @@ function setPdfInfo(msg) {
 
 function escapeHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function friendlyFetchError(err) {
+  if (err instanceof TypeError || /failed to fetch|networkerror/i.test(err.message)) {
+    return 'Cannot reach the ione server. Is it still running? Restart it with the "ione" command (default port 8311) and reload this page from the right URL.';
+  }
+  return err.message;
 }
 
 window.renderPdfPage = renderPdfPage;
