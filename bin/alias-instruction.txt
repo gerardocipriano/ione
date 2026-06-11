@@ -6,4 +6,4 @@ alias ione='$HOME/code/ione/bin/ione-server.sh'
 
 # The launcher bootstraps a Python venv with markitdown on first run,
 # starts the Ione server (static tools + /api/markitdown) and opens the browser.
-# Usage: ione [port]   (default 8080)
+# Usage: ione [port]   (default 8311)

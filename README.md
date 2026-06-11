@@ -21,7 +21,7 @@ Add to your `~/.zshrc` / `~/.bashrc`:
 alias ione='$HOME/code/ione/bin/ione-server.sh'
 ```
 
-Then just type `ione` (optionally `ione 3000` for a custom port — default is `8080`).
+Then just type `ione` (optionally `ione 3000` for a custom port — default is `8311`). If an ione server is already running, the launcher restarts it automatically.
 
 ## 🧰 Tools
 
@@ -51,7 +51,7 @@ Upload any document via drag & drop and get clean Markdown back — copy it or d
 
 ```bash
 # Use it from the CLI too:
-curl -F "file=@report.docx" http://localhost:8080/api/markitdown | jq -r .markdown
+curl -F "file=@report.docx" http://localhost:8311/api/markitdown | jq -r .markdown
 ```
 
 ## 📄 PDF Tools
@@ -71,8 +71,8 @@ Seven operations under `POST /api/pdf/<op>` (multipart; success → binary PDF/z
 | `/api/pdf/form-fill` | `file`, `fields` (JSON object name→value) → filled PDF | pypdf |
 
 ```bash
-curl -F "file=@a.pdf" -F "file=@b.pdf" http://localhost:8080/api/pdf/merge -o merged.pdf
-curl -F "file=@doc.pdf" -F "signature=@sig.png" -F position=br -F scale=0.2 http://localhost:8080/api/pdf/sign -o signed.pdf
+curl -F "file=@a.pdf" -F "file=@b.pdf" http://localhost:8311/api/pdf/merge -o merged.pdf
+curl -F "file=@doc.pdf" -F "signature=@sig.png" -F position=br -F scale=0.2 http://localhost:8311/api/pdf/sign -o signed.pdf
 ```
 
 The launcher auto-downloads the **pdfcpu** single binary (~8 MB, Apache-2.0) into `.venv/bin` on first run — no Java, no Docker, no system packages.
@@ -104,7 +104,7 @@ ione/
 
 - Python 3.10+
 - A browser
-- `xdg-open` (Linux) for auto-opening — otherwise just visit `http://localhost:8080`
+- `xdg-open` (Linux) for auto-opening — otherwise just visit `http://localhost:8311`
 
 ## 📄 License
 

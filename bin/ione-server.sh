@@ -1,6 +1,6 @@
 #!/bin/bash
 # ione server launcher — bootstraps venv, starts server, opens browser
-PORT=${1:-8080}
+PORT=${1:-8311}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="$PROJECT_ROOT/.venv"
@@ -34,9 +34,18 @@ if [ ! -x "$VENV_DIR/bin/pdfcpu" ]; then
     fi
 fi
 
+# restart any running ione server instance
+OLD_PIDS="$(pgrep -f "python[0-9.]* .*ione_server\.py" || true)"
+if [ -n "$OLD_PIDS" ]; then
+    echo "  Restarting ione (killing previous instance: $OLD_PIDS)..."
+    kill $OLD_PIDS 2>/dev/null
+    sleep 0.5
+    kill -9 $OLD_PIDS 2>/dev/null
+fi
+
 if curl -s --max-time 1 -o /dev/null "http://127.0.0.1:$PORT"; then
-    echo "  ⚠ Port $PORT is already in use (an old ione/http.server instance?)."
-    echo "    Find it with:  ss -ltnp | grep :$PORT   then kill the PID, or run: ione <other-port>"
+    echo "  ⚠ Port $PORT is in use by another program (not ione)."
+    echo "    Find it with:  ss -ltnp | grep :$PORT   or run: ione <other-port>"
     exit 1
 fi
 
