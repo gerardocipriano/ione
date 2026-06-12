@@ -45,6 +45,13 @@ function buildToolContent(sub) {
   var dropzoneHtml = '';
   var controlsHtml = '';
   var actionLabel = '';
+  var previewHtml = '<div id="pdfPreviewArea" style="display:none">'
+    + '<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">'
+    + '<button class="btn btn-sm" id="pdfChangePreview" type="button">Change PDF</button>'
+    + '<span id="pdfPreviewInfo" style="font-size:.85rem;color:var(--text-muted)"></span>'
+    + '</div>'
+    + '<div id="pdfThumbnails" class="pdf-thumb-grid"></div>'
+    + '</div>';
 
   switch (sub) {
     case 'merge':
@@ -67,7 +74,8 @@ function buildToolContent(sub) {
         + '<p class="img-dropzone-hint">Each page becomes a separate PDF file</p>'
         + '</div>'
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
-        + '</div>';
+        + '</div>'
+        + previewHtml;
       actionLabel = '✂️ Split PDF';
       break;
     case 'extract':
@@ -77,7 +85,8 @@ function buildToolContent(sub) {
         + '<p><strong>Drop a PDF here</strong> or click to browse</p>'
         + '</div>'
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
-        + '</div>';
+        + '</div>'
+        + previewHtml;
       controlsHtml = '<div class="pdf-controls" style="margin-bottom:.75rem">'
         + '<label style="font-size:.85rem;display:block;margin-bottom:.25rem">Pages to extract:</label>'
         + '<input type="text" id="pdfPages" placeholder="e.g. 1,3,5-9" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card)">'
@@ -91,7 +100,8 @@ function buildToolContent(sub) {
         + '<p><strong>Drop a PDF here</strong> or click to browse</p>'
         + '</div>'
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
-        + '</div>';
+        + '</div>'
+        + previewHtml;
       controlsHtml = '<div class="pdf-controls" style="margin-bottom:.75rem">'
         + '<label style="font-size:.85rem;display:block;margin-bottom:.25rem">Pages to remove:</label>'
         + '<input type="text" id="pdfPages" placeholder="e.g. 1,3,5-9" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card)">'
@@ -105,7 +115,8 @@ function buildToolContent(sub) {
         + '<p><strong>Drop a PDF here</strong> or click to browse</p>'
         + '</div>'
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
-        + '</div>';
+        + '</div>'
+        + previewHtml;
       controlsHtml = '<div class="pdf-controls" style="margin-bottom:.75rem">'
         + '<label style="font-size:.85rem;display:block;margin-bottom:.25rem">Angle:</label>'
         + '<select id="pdfAngle" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);margin-bottom:.5rem">'
@@ -125,7 +136,8 @@ function buildToolContent(sub) {
         + '<p><strong>Drop a PDF here</strong> or click to browse</p>'
         + '</div>'
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
-        + '</div>';
+        + '</div>'
+        + previewHtml;
       actionLabel = '🗜️ Compress PDF';
       break;
     case 'sign':
@@ -208,6 +220,236 @@ function bindPdfEvents(sub) {
     });
   }
 
+  /* Generic Change PDF button (non-sign preview area) */
+  var changePreviewBtn = document.getElementById('pdfChangePreview');
+  if (changePreviewBtn) {
+    changePreviewBtn.addEventListener('click', function() {
+      var dz = document.getElementById('pdfDropzone');
+      var pa = document.getElementById('pdfPreviewArea');
+      if (dz) dz.style.display = '';
+      if (pa) pa.style.display = 'none';
+      selectedPdfFile = null;
+      var infoEl = document.getElementById('pdfFileInfo');
+      if (infoEl) infoEl.textContent = '';
+      var cont = document.getElementById('pdfThumbnails');
+      if (cont) cont.innerHTML = '';
+      var pi = document.getElementById('pdfPreviewInfo');
+      if (pi) pi.textContent = '';
+    });
+  }
+
+  /* ── Thumbnail helpers (called by handleFileSelect / handleMergeFiles) ── */
+  function showThumbnailPreview(file) {
+    var dz = document.getElementById('pdfDropzone');
+    var pa = document.getElementById('pdfPreviewArea');
+    var cont = document.getElementById('pdfThumbnails');
+    if (!pa || !cont) return;
+    if (dz) dz.style.display = 'none';
+    pa.style.display = 'block';
+
+    var selectedSet = {};
+
+    renderPdfThumbnails(file, cont, {
+      thumbWidth: 150,
+      selectable: (sub === 'extract' || sub === 'delete'),
+      selectedSet: selectedSet
+    }).then(function(totalPages) {
+      var infoEl = document.getElementById('pdfPreviewInfo');
+      if (infoEl) infoEl.textContent = totalPages + ' page' + (totalPages !== 1 ? 's' : '');
+
+      if (sub === 'extract' || sub === 'delete') {
+        initSelectableThumbs(cont, selectedSet);
+      }
+      if (sub === 'rotate') {
+        initRotateThumbs(cont);
+      }
+    }).catch(function(err) {
+      setPdfError('Preview error: ' + err.message);
+      if (dz) dz.style.display = '';
+      if (pa) pa.style.display = 'none';
+    });
+  }
+
+  function initSelectableThumbs(container, selectedSet) {
+    container.querySelectorAll('.pdf-thumb-wrap').forEach(function(wrap) {
+      wrap.addEventListener('click', function() {
+        var pn = parseInt(this.dataset.page);
+        if (selectedSet[pn]) {
+          delete selectedSet[pn];
+          this.classList.remove('pdf-thumb-selected');
+        } else {
+          selectedSet[pn] = true;
+          this.classList.add('pdf-thumb-selected');
+        }
+        updatePagesInput(selectedSet);
+      });
+    });
+  }
+
+  function updatePagesInput(selectedSet) {
+    var input = document.getElementById('pdfPages');
+    if (!input) return;
+    var pages = Object.keys(selectedSet).map(Number).sort(function(a, b) { return a - b; });
+    input.value = compactPageRange(pages);
+  }
+
+  function compactPageRange(pages) {
+    if (!pages || pages.length === 0) return '';
+    var parts = [];
+    var start = pages[0], end = pages[0];
+    for (var i = 1; i < pages.length; i++) {
+      if (pages[i] === end + 1) {
+        end = pages[i];
+      } else {
+        parts.push(start === end ? '' + start : start + '-' + end);
+        start = end = pages[i];
+      }
+    }
+    parts.push(start === end ? '' + start : start + '-' + end);
+    return parts.join(',');
+  }
+
+  function parsePageSet(str) {
+    var set = {};
+    if (!str || !str.trim()) return set;
+    var parts = str.split(',');
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i].trim();
+      if (!p) continue;
+      var r = p.split('-');
+      if (r.length === 2) {
+        var s = parseInt(r[0]), e = parseInt(r[1]);
+        if (!isNaN(s) && !isNaN(e)) {
+          for (var j = s; j <= e; j++) set[j] = true;
+        }
+      } else {
+        var n = parseInt(p);
+        if (!isNaN(n)) set[n] = true;
+      }
+    }
+    return set;
+  }
+
+  function initRotateThumbs(container) {
+    var angleSel = document.getElementById('pdfAngle');
+    var pagesInput = document.getElementById('pdfPages');
+    if (!angleSel) return;
+
+    function applyRotation() {
+      var angle = parseInt(angleSel.value) || 0;
+      var hasPages = pagesInput && pagesInput.value.trim();
+      var pageSet = hasPages ? parsePageSet(pagesInput.value) : {};
+
+      container.querySelectorAll('.pdf-thumb-wrap').forEach(function(wrap) {
+        var pn = parseInt(wrap.dataset.page);
+        if (!hasPages || pageSet[pn]) {
+          wrap.style.transform = 'rotate(' + angle + 'deg)';
+        } else {
+          wrap.style.transform = '';
+        }
+      });
+    }
+
+    angleSel.addEventListener('change', applyRotation);
+    if (pagesInput) {
+      pagesInput.addEventListener('input', applyRotation);
+    }
+  }
+
+  function loadMergeThumb(file, thumbEl, pagesEl) {
+    var reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        var pdfjsLib = await import('/js/vendor/pdf.min.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/vendor/pdf.worker.min.mjs';
+        var pdfDoc = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+        var total = pdfDoc.numPages;
+        if (pagesEl) pagesEl.textContent = total + ' page' + (total !== 1 ? 's' : '');
+        var page = await pdfDoc.getPage(1);
+        var vp = page.getViewport({ scale: 1 });
+        var sc = 60 / vp.width;
+        var svp = page.getViewport({ scale: sc });
+        var cvs = document.createElement('canvas');
+        cvs.width = Math.round(svp.width);
+        cvs.height = Math.round(svp.height);
+        cvs.className = 'pdf-merge-thumb-canvas';
+        await page.render({ canvasContext: cvs.getContext('2d'), viewport: svp }).promise;
+        thumbEl.innerHTML = '';
+        thumbEl.appendChild(cvs);
+      } catch (e) {
+        thumbEl.innerHTML = '<span style="font-size:.72rem;color:var(--text-muted)">N/A</span>';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function showFormThumbnail(file) {
+    var dz = document.getElementById('pdfDropzone');
+    var formArea = document.getElementById('pdfFormFieldsArea');
+    if (!dz || !formArea) return;
+    dz.style.display = 'none';
+
+    var existing = document.querySelector('.pdf-form-header');
+    if (existing) existing.remove();
+
+    var header = document.createElement('div');
+    header.className = 'pdf-form-header';
+
+    var thumbWrap = document.createElement('div');
+    thumbWrap.className = 'pdf-form-thumb';
+    header.appendChild(thumbWrap);
+
+    var infoWrap = document.createElement('div');
+    infoWrap.style.cssText = 'flex:1;font-size:.85rem';
+    infoWrap.innerHTML = '<strong>' + file.name + '</strong><br><span style="color:var(--text-muted)">' + (file.size / 1024 / 1024).toFixed(1) + ' MB</span>';
+    header.appendChild(infoWrap);
+
+    var changeBtn = document.createElement('button');
+    changeBtn.className = 'btn btn-sm';
+    changeBtn.textContent = 'Change PDF';
+    changeBtn.addEventListener('click', function() {
+      dz.style.display = '';
+      header.remove();
+      selectedPdfFile = null;
+      formFieldsData = null;
+      formInitialValues = {};
+      formArea.innerHTML = '';
+      var infoEl = document.getElementById('pdfFileInfo');
+      if (infoEl) infoEl.textContent = '';
+    });
+    header.appendChild(changeBtn);
+
+    formArea.parentNode.insertBefore(header, formArea);
+
+    loadFirstPageThumb(file, thumbWrap, 150);
+  }
+
+  function loadFirstPageThumb(file, container, width) {
+    width = width || 150;
+    var reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        var pdfjsLib = await import('/js/vendor/pdf.min.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/vendor/pdf.worker.min.mjs';
+        var pdfDoc = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+        var page = await pdfDoc.getPage(1);
+        var vp = page.getViewport({ scale: 1 });
+        var sc = width / vp.width;
+        var svp = page.getViewport({ scale: sc });
+        var cvs = document.createElement('canvas');
+        cvs.width = Math.round(svp.width);
+        cvs.height = Math.round(svp.height);
+        cvs.style.cssText = 'display:block;width:100%;height:auto';
+        await page.render({ canvasContext: cvs.getContext('2d'), viewport: svp }).promise;
+        container.innerHTML = '';
+        container.appendChild(cvs);
+      } catch (e) {
+        container.innerHTML = '<span style="font-size:.72rem;color:var(--text-muted)">Preview unavailable</span>';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
   if (sub === 'merge') {
     dropzone.addEventListener('click', function() { fileInput.click(); });
     dropzone.addEventListener('dragover', function(e) { e.preventDefault(); dropzone.classList.add('drag-over'); });
@@ -257,6 +499,12 @@ function bindPdfEvents(sub) {
     if (sub === 'sign' && signLoadPdf) {
       signLoadPdf(file);
     }
+    if (sub !== 'sign' && sub !== 'merge' && sub !== 'form') {
+      showThumbnailPreview(file);
+    }
+    if (sub === 'form') {
+      showFormThumbnail(file);
+    }
   }
 
   function handleMergeFiles(fileList) {
@@ -287,10 +535,16 @@ function bindPdfEvents(sub) {
     mergeFiles.forEach(function(file, i) {
       var item = document.createElement('div');
       item.className = 'pdf-file-item';
-      item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:.4rem .6rem;margin-bottom:.25rem;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:.85rem';
-      item.innerHTML = '<span>' + (i + 1) + '. ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)</span>'
-        + '<button class="btn btn-sm pdf-remove-btn" data-index="' + i + '" style="color:var(--danger);border:0;background:none;cursor:pointer;font-size:1.1rem">✕</button>';
+      item.style.cssText = 'display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;margin-bottom:.25rem;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:.85rem';
+      item.innerHTML = '<div class="pdf-merge-thumb" style="width:60px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#f1f5f9;border:1px solid var(--border);border-radius:4px;overflow:hidden;min-height:40px"><span style="font-size:.72rem;color:var(--text-muted)">Loading\u2026</span></div>'
+        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (i + 1) + '. ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)</span>'
+        + '<span class="pdf-merge-pages" style="font-size:.78rem;color:var(--text-muted);flex-shrink:0"></span>'
+        + '<button class="btn btn-sm pdf-remove-btn" data-index="' + i + '" style="color:var(--danger);border:0;background:none;cursor:pointer;font-size:1.1rem;flex-shrink:0">✕</button>';
       listEl.appendChild(item);
+
+      var thumbEl = item.querySelector('.pdf-merge-thumb');
+      var pagesEl = item.querySelector('.pdf-merge-pages');
+      loadMergeThumb(file, thumbEl, pagesEl);
     });
     listEl.querySelectorAll('.pdf-remove-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -1037,6 +1291,92 @@ function friendlyFetchError(err) {
     return 'Cannot reach the ione server. Is it still running? Restart it with the "ione" command (default port 8311) and reload this page from the right URL.';
   }
   return err.message;
+}
+
+/* ── Shared PDF thumbnail renderer ──────────────────── */
+function renderPdfThumbnails(file, containerEl, opts) {
+  opts = opts || {};
+  var tw = opts.thumbWidth || 150;
+  var maxP = opts.maxPages || 0;
+  var sel = opts.selectable || false;
+  var selSet = opts.selectedSet || {};
+
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        var pdfjsLib = await import('/js/vendor/pdf.min.mjs');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/vendor/pdf.worker.min.mjs';
+        var pdfDoc = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+        var total = pdfDoc.numPages;
+        var toR = maxP > 0 ? Math.min(maxP, total) : Math.min(total, 50);
+
+        containerEl.innerHTML = '';
+        containerEl.style.display = 'flex';
+        containerEl.style.flexWrap = 'wrap';
+        containerEl.style.gap = '8px';
+
+        var i;
+        for (i = 1; i <= toR; i++) {
+          var wrap = document.createElement('div');
+          wrap.className = 'pdf-thumb-wrap';
+          wrap.style.width = tw + 'px';
+          wrap.dataset.page = i;
+          if (sel) {
+            wrap.classList.add('pdf-thumb-selectable');
+            var chk = document.createElement('span');
+            chk.className = 'pdf-thumb-check';
+            chk.textContent = '\u2713';
+            wrap.appendChild(chk);
+          }
+          containerEl.appendChild(wrap);
+        }
+
+        var wraps = containerEl.querySelectorAll('.pdf-thumb-wrap');
+        var promises = [];
+        for (i = 1; i <= toR; i++) {
+          (function(pn, w) {
+            promises.push(
+              pdfDoc.getPage(pn).then(function(page) {
+                var vp = page.getViewport({ scale: 1 });
+                var sc = tw / vp.width;
+                var svp = page.getViewport({ scale: sc });
+                var cvs = document.createElement('canvas');
+                cvs.width = Math.round(svp.width);
+                cvs.height = Math.round(svp.height);
+                cvs.className = 'pdf-thumb-canvas';
+                return page.render({ canvasContext: cvs.getContext('2d'), viewport: svp }).promise.then(function() {
+                  var lb = document.createElement('div');
+                  lb.className = 'pdf-thumb-label';
+                  lb.textContent = 'Page ' + pn;
+                  w.insertBefore(cvs, w.firstChild);
+                  w.appendChild(lb);
+                  if (sel && pn <= total && selSet[pn]) {
+                    w.classList.add('pdf-thumb-selected');
+                  }
+                });
+              })
+            );
+          })(i, wraps[i - 1]);
+        }
+
+        await Promise.all(promises);
+
+        if (total > 50 && maxP === 0) {
+          var warn = document.createElement('div');
+          warn.className = 'pdf-thumb-warning';
+          warn.textContent = 'Showing first 50 of ' + total + ' pages.';
+          containerEl.appendChild(warn);
+        }
+
+        resolve(total);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = function() { reject(new Error('Failed to read file')); };
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 window.renderPdfPage = renderPdfPage;
