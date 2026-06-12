@@ -65,7 +65,7 @@ Seven operations under `POST /api/pdf/<op>` (multipart; success → binary PDF/z
 | `/api/pdf/extract` | `file`, `pages` (`1,3,5-9`) | pypdf |
 | `/api/pdf/delete` | `file`, `pages` | pypdf |
 | `/api/pdf/rotate` | `file`, `angle` (90/180/270), `pages` (optional) | pypdf |
-| `/api/pdf/compress` | `file` | pdfcpu `optimize` |
+| `/api/pdf/compress` | `file`, `quality` (`screen`/`ebook`/`printer`, default `ebook`) | Ghostscript `-dPDFSETTINGS` (falls back to pdfcpu; returns the original untouched if it's already optimal) |
 | `/api/pdf/sign` | `file`, `signature` (PNG/JPG/WebP), `page`, `position` (9 anchors), `scale` | pdfcpu `stamp` |
 | `/api/pdf/form-fields` | `file` → JSON list of AcroForm fields (name, type, value, states) | pypdf |
 | `/api/pdf/form-fill` | `file`, `fields` (JSON object name→value) → filled PDF | pypdf |

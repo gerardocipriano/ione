@@ -138,6 +138,14 @@ function buildToolContent(sub) {
         + '<input type="file" id="pdfFileInput" accept=".pdf" style="display:none">'
         + '</div>'
         + previewHtml;
+      controlsHtml = '<div class="pdf-controls" style="margin-bottom:.75rem">'
+        + '<label style="font-size:.85rem;display:block;margin-bottom:.25rem">Quality:</label>'
+        + '<select id="pdfQuality" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-card)">'
+        + '<option value="screen">Massima compressione - 72dpi</option>'
+        + '<option value="ebook" selected>Bilanciata - 150dpi</option>'
+        + '<option value="printer">Alta qualit\u00e0 - 300dpi</option>'
+        + '</select>'
+        + '</div>';
       actionLabel = '🗜️ Compress PDF';
       break;
     case 'sign':
@@ -1190,6 +1198,11 @@ function bindPdfEvents(sub) {
       formData.append('angle', document.getElementById('pdfAngle')?.value || '90');
       var pagesVal = document.getElementById('pdfPages')?.value.trim();
       if (pagesVal) formData.append('pages', pagesVal);
+    }
+
+    if (sub === 'compress') {
+      var qualityEl = document.getElementById('pdfQuality');
+      if (qualityEl) formData.append('quality', qualityEl.value);
     }
 
     var endpoint = '/api/pdf/' + sub;

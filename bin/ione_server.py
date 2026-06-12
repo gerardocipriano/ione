@@ -506,11 +506,23 @@ class IoneHandler(http.server.SimpleHTTPRequestHandler):
             })
             return
 
+        quality = 'ebook'
+        quality_field = next((f[2].decode('utf-8') for f in fields if f[0] == 'quality'), None)
+        if quality_field is not None:
+            quality = quality_field.strip().lower()
+            if quality not in ('screen', 'ebook', 'printer'):
+                self._send_json(HTTPStatus.BAD_REQUEST, {
+                    'error': 'quality must be one of: screen, ebook, printer'
+                })
+                return
+
+        gs_bin = shutil.which('gs')
         pdfcpu = self._pdfcpu_bin()
-        if pdfcpu is None:
+
+        if gs_bin is None and pdfcpu is None:
             self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
-                'error': 'pdfcpu binary not available',
-                'message': 'Install pdfcpu or ensure it is in PATH'
+                'error': 'No compression tool available (ghostscript or pdfcpu required)',
+                'message': 'Install ghostscript (gs) or pdfcpu'
             })
             return
 
@@ -522,22 +534,58 @@ class IoneHandler(http.server.SimpleHTTPRequestHandler):
             with open(in_path, 'wb') as f:
                 f.write(data)
 
-            subprocess.run(
-                [pdfcpu, 'optimize', in_path, out_path],
-                timeout=120, check=True
-            )
+            if gs_bin is not None:
+                try:
+                    subprocess.run(
+                        [gs_bin, '-q', '-dNOPAUSE', '-dBATCH', '-dSAFER',
+                         '-sDEVICE=pdfwrite',
+                         f'-dPDFSETTINGS=/{quality}',
+                         '-o', out_path, in_path],
+                        timeout=180, check=True
+                    )
 
-            with open(out_path, 'rb') as f:
-                result = f.read()
+                    with open(out_path, 'rb') as f:
+                        result = f.read()
 
-            self._send_binary(HTTPStatus.OK, result, 'application/pdf', 'compressed.pdf')
+                    if len(result) > len(data):
+                        self.send_response(HTTPStatus.OK)
+                        self.send_header('Content-Type', 'application/pdf')
+                        self.send_header('Content-Length', str(len(data)))
+                        self.send_header('Content-Disposition',
+                                         'attachment; filename="compressed.pdf"')
+                        self.send_header('X-Compress-Note', 'already-optimized')
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
+
+                    self._send_binary(HTTPStatus.OK, result, 'application/pdf', 'compressed.pdf')
+                    return
+                except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                    if pdfcpu is None:
+                        self._send_json(HTTPStatus.BAD_REQUEST, {
+                            'error': 'Ghostscript compression failed'
+                        })
+                        return
+
+            if pdfcpu is not None:
+                subprocess.run(
+                    [pdfcpu, 'optimize', in_path, out_path],
+                    timeout=120, check=True
+                )
+
+                with open(out_path, 'rb') as f:
+                    result = f.read()
+
+                self._send_binary(HTTPStatus.OK, result, 'application/pdf', 'compressed.pdf')
+                return
+
         except subprocess.TimeoutExpired:
             self._send_json(HTTPStatus.REQUEST_TIMEOUT, {
                 'error': 'Compression timed out'
             })
         except subprocess.CalledProcessError as e:
             self._send_json(HTTPStatus.BAD_REQUEST, {
-                'error': f'pdfcpu optimize failed: {e}'
+                'error': f'Compression failed: {e}'
             })
         except Exception as e:
             self._send_json(HTTPStatus.BAD_REQUEST, {
